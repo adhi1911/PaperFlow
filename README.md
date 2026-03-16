@@ -1,127 +1,132 @@
 # PaperFlow
 
-A minimal RAG (Retrieval-Augmented Generation) system for research papers.
+A minimal RAG (Retrieval-Augmented Generation) system for research papers using **LangChain** primitives.
 
-## Overview
+## ⭐ Key Features
 
-PaperFlow demonstrates a complete RAG pipeline:
-1. **Load** research papers (PDFs) incrementally
-2. **Chunk** semantically with overlap
-3. **Index** with hybrid retrieval (BM25 + vector search)
-4. **Rerank** for quality
-5. **Generate** answers using GroqLLM
+- **LangChain-based**: Uses LangChain `Document` objects throughout pipeline
+- **Modular services**: Each service independent and reusable
+- **Incremental processing**: Only processes new/updated papers
+- **Persistent chunks**: Stores chunks with metadata in JSONL
+- **No config overhead**: Simple directory-based setup
 
 ## Architecture
 
-### Modular Services
+### Core Data Flow
 
-Each service is independent, callable from Python or FastAPI later:
-
-- **PaperRegistry**: Tracks which papers are processed via manifest file (detects duplicates/updates)
-- **IncrementalChunker**: Chunks specific papers (reusable)
-- **ChunkStore**: Manages chunks.jsonl persistence (append/remove/query)
-- **PaperProcessor**: Orchestrates the workflow (coordinator)
-
-### Incremental Processing
-
-Only processes NEW and UPDATED papers:
 ```
-First run:
-  paper1.pdf + paper2.pdf → 350 chunks
-
-Add paper3.pdf later:
-  paper3.pdf only → 120 chunks (appended)
-  Total: 470 chunks (no reprocessing)
-
-Update paper1.pdf:
-  Removes old chunks + adds new chunks
+PDFs (any time)
+    ↓
+DocumentLoader (DirectoryLoader + PyMuPDFLoader)
+    → LangChain Document objects
+    ↓
+ChunkingService (RecursiveCharacterTextSplitter)
+    → LangChain Document chunks with metadata
+    ↓
+ChunkStore
+    → Persisted to chunks.jsonl
 ```
 
-## Structure
+### Services (LangChain Document-based)
+
+**DocumentLoader** - Load PDFs as LangChain Documents
+- Uses: `langchain_community.document_loaders.DirectoryLoader` + `PyMuPDFLoader`
+- Returns: `List[Document]` with metadata (source, page)
+
+**ChunkingService** - Split Documents preserving metadata
+- Uses: `langchain_text_splitters.RecursiveCharacterTextSplitter`
+- Config: chunk_size=1000, chunk_overlap=200
+- Returns: `List[Document]` with chunk_index metadata
+
+**ChunkStore** - Persist and query Document chunks
+- Serializes: Document ↔ JSON with full metadata preservation
+- Methods: `load_all_chunks()`, `append_chunks()`, `get_chunks_by_source()`, `remove_chunks_by_source()`
+- Returns: `List[Document]`
+
+**IncrementalChunker** - Chunk specific papers
+- Orchestrates: DocumentLoader → ChunkingService
+- Returns: `List[Document]`
+
+**PaperRegistry** - Track processed papers
+- Detects: New papers (not in manifest) and updated papers (hash changed)
+- Persists: papers_manifest.json with MD5 hashes
+- Purpose: Avoid reprocessing
+
+**PaperProcessor** - Full orchestration
+- Workflow:
+  1. Registry finds new/updated papers
+  2. IncrementalChunker processes them
+  3. ChunkStore persists/updates chunks
+  4. Registry updates manifest
+- Returns: Processing summary
+
+## Directory Structure
 
 ```
 backend/
 ├── services/
-│   ├── paper_registry.py       # Tracks processed papers (manifest)
-│   ├── incremental_chunker.py  # Chunks specific papers
-│   ├── chunk_store.py          # Manages chunks.jsonl
-│   ├── paper_processor.py      # Orchestrates workflow
-│   ├── document_loader.py      # PDF loading
-│   └── chunking_service.py     # Text chunking logic
-├── core/
-│   └── config.py               # Paths, chunk sizes
-├── utils/
-│   └── text_utils.py           # Text preprocessing
-└── process_papers.py           # Main entry point
+│   ├── document_loader.py       # LangChain DirectoryLoader wrapper
+│   ├── chunking_service.py      # LangChain RecursiveCharacterTextSplitter wrapper
+│   ├── incremental_chunker.py   # Orchestrates loader + chunker
+│   ├── chunk_store.py           # Document serialization + JSONL persistence
+│   ├── paper_registry.py        # Manifest-based change detection
+│   └── paper_processor.py       # Full orchestration
+├── process_papers.py            # CLI entry point
+├── example_usage.py             # Service examples
+├── test_services.py             # Unit tests
+└── requirements.txt             # Dependencies
 
 data/
-├── raw_papers/                 # Place PDFs here (any time)
-├── papers_manifest.json        # Auto-generated (tracks papers)
-└── processed/
-    └── chunks.jsonl            # All chunks (auto-generated)
+├── raw_papers/                  # Add PDF files here
+├── papers_manifest.json         # Auto-generated (tracks papers)
+└── chunks.jsonl                 # Auto-generated (all chunks)
 ```
 
 ## Quick Start
 
-### Setup
+### 1. Install Dependencies
 
 ```bash
-# Install dependencies
 pip install -r backend/requirements.txt
-
-# Create data directory
-mkdir -p data/raw_papers
 ```
 
-### Add Papers
+Dependencies include:
+- `langchain-core` - Document objects
+- `langchain-community` - DirectoryLoader, PyMuPDFLoader
+- `langchain-text-splitters` - RecursiveCharacterTextSplitter
+- `pymupdf` - PDF loading
+
+### 2. Add Papers
 
 Place PDF files in `data/raw_papers/`:
 ```bash
+mkdir -p data/raw_papers
 cp my_research_papers/*.pdf data/raw_papers/
 ```
 
-### Process Papers
+### 3. Process Papers
 
 ```bash
 python -m backend.process_papers
 ```
 
-**Output:**
-- `data/raw_papers/papers_manifest.json` - Tracks which papers processed
-- `data/processed/chunks.jsonl` - All chunks from all papers
-
-### Add More Papers Later
-
-Simply drop new PDFs in `data/raw_papers/` and run again:
-```bash
-cp new_paper.pdf data/raw_papers/
-python -m backend.process_papers
+**First Run Output:**
+```
+Started paper processing...
+New papers: 3
+Updated papers: 0
+Processing complete! ✓
+Total chunks: 427
 ```
 
-Only the new paper is processed and chunks are appended.
-
-### Check Status
-
-```python
-from backend.services.paper_processor import PaperProcessor
-from backend.core.config import RAW_PAPERS_DIR, PROCESSED_CHUNKS_DIR
-
-processor = PaperProcessor(
-    papers_dir=RAW_PAPERS_DIR,
-    manifest_path=RAW_PAPERS_DIR.parent / "papers_manifest.json",
-    chunks_file=PROCESSED_CHUNKS_DIR / "chunks.jsonl",
-)
-
-status = processor.get_status()
-print(status)
+**Next Run (with new papers):**
 ```
-
-## Design Decisions
-
-1. **Update handling**: Re-processed papers replace old chunks (clean, not versioned)
-2. **Directory structure**: Flat (no subdirectories) for MVP
-3. **Deletion**: Deferred - chunks remain immutable for now
-4. **Service style**: Pure services, no web coupling (callable from FastAPI later)
+Started paper processing...
+New papers: 1
+Updated papers: 0
+Processing complete! ✓
+Total chunks: 523  # Only new paper chunks added
+```
 
 ## Development Roadmap
 

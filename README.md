@@ -1,15 +1,15 @@
 # PaperFlow
 
-Load research papers, split into chunks, and store with full metadata. Build a knowledge base for RAG systems in 3 lines of code.
+End-to-end RAG initialization: Load PDFs → chunk → embed → semantic search. Ready for LLM generation.
 
 ## Features
 
-- **Simple API**: Load PDFs → chunk → query in 3 service calls
-- **LangChain-native**: Full `Document` objects preserved throughout (metadata intact)
+- **PDF to embeddings**: Auto-pipeline from raw PDFs to dense vectors
+- **LangChain-native**: Full `Document` objects preserved with metadata throughout
+- **Semantic search**: Query by natural language, get similar chunks ranked by cosine similarity
 - **Incremental processing**: Only reprocess modified papers (MD5 hashing)
-- **Flexible loading**: Bulk load via DirectoryLoader or single file via PyMuPDFLoader
-- **Persistent storage**: JSONL format with queryable metadata
-- **Change tracking**: Auto-detects new/modified papers, avoids redundant work
+- **Flexible storage**: JSONL chunks + Chroma vector DB (easy swap to Milvus/Qdrant)
+- **Change tracking**: Auto-detects new/modified papers, auto-deletes old embeddings
 
 ## Quick Start
 
@@ -106,57 +106,100 @@ result = processor.process_all()  # Load → chunk → store → track
 # Returns: {new_processed, updated_processed, total_chunks, status}
 ```
 
+### EmbeddingService
+```python
+from backend.services.embedding import EmbeddingService
+
+embedding_service = EmbeddingService(model_name="all-MiniLM-L6-v2")
+embed_texts = embedding_service.embed_texts(texts)  # Returns np.ndarray
+results = embedding_service.embed_chunks(chunks)     # Returns list[{chunk_id, embedding, metadata}]
+```
+
+### VectorStore (Chroma)
+```python
+from backend.services.vector_store import VectorStore
+
+vector_store = VectorStore()
+vector_store.add_embeddings(embedding_results)       # Add from EmbeddingService
+results = vector_store.search(query_embedding, top_k=5, score_threshold=0.0)
+vector_store.delete_by_source("paper.pdf")          # Remove old vectors
+stats = vector_store.get_stats()                     # {total_vectors, total_sources}
+```
+
 ## How It Works
 
 ```
 PDFs (data/raw_papers/)
   ↓
-DocumentLoader (load_all_pdfs or load_specific_pdf)
+DocumentLoader (DirectoryLoader bulk + PyMuPDFLoader single)
   ↓
-LangChain Documents with metadata (source, page)
+LangChain Documents (source, page metadata)
   ↓
-ChunkingService (RecursiveCharacterTextSplitter)
+ChunkingService (RecursiveCharacterTextSplitter: 1000 char, 200 overlap)
   ↓
-Chunks with added chunk_index metadata
+Chunks with chunk_index metadata
   ↓
-ChunkStore (JSONL persistence)
+ChunkStore (JSONL persistence, queryable by source/page)
   ↓
-Query by source, get stats, track changes
+PaperRegistry (MD5 tracking, detects new/modified papers)
   ↓
-PaperRegistry (MD5 hashing for change detection)
+EmbeddingService (Sentence-Transformers: all-MiniLM-L6-v2, 384-dim)
+  ↓
+VectorStore (Chroma: stores embeddings + metadata, enables ANN search)
+  ↓
+Semantic Search (cosine similarity, ranked results)
 ```
 
 Each service is independent—use them individually or orchestrate with `PaperProcessor`.
 
 ## Examples
 
-See [examples.ipynb](examples.ipynb) for a working 7-step notebook:
+See [examples.ipynb](examples.ipynb) for a working 9-step notebook:
 1. Setup (imports, config)
 2. Check prerequisites
-3. Process papers
+3. Process papers → chunks
 4. Inspect results
 5. Query chunks
 6. Query by paper
 7. Detect changes
+8. Generate embeddings (384-dim)
+9. Semantic search
 
 
 ## Tech Stack
 
+**Document Pipeline:**
 - **PDF Processing**: PyMuPDF
 - **Document Format**: LangChain Document objects
-- **Text Splitting**: LangChain RecursiveCharacterTextSplitter
-- **Storage**: JSONL (preserves full metadata)
+- **Text Splitting**: LangChain RecursiveCharacterTextSplitter (1000 chars, 200 overlap)
+- **Chunk Storage**: JSONL (preserves metadata)
 - **Change Detection**: MD5 hashing
+
+**Embedding & Search:**
+- **Embeddings**: Sentence-Transformers (all-MiniLM-L6-v2: 384-dim, fast)
+- **Vector DB**: Chroma (local, persistent, easy to scale to Milvus/Qdrant)
+- **Search**: ANN via Chroma (cosine similarity, ranked by score)
+
+**Core:**
 - **Config**: Pydantic Settings + .env
 
-## Next Steps
+## Development Status
 
-Build embeddings, vector search, and LLM generation on top of this knowledge base:
-- [ ] Sentence-Transformers for embeddings
-- [ ] Vector storage
-- [ ] Hybrid retrieval (BM25 + semantic)
-- [ ] GroqLLM integration
-- [ ] FastAPI + React frontend
+**✅ Completed:**
+- Document loading (18 PDFs)
+- Chunking (1387 chunks, 1000 char / 200 overlap)
+- Chunk storage (JSONL format with metadata)
+- Incremental processing (MD5 tracking)
+- Embedding generation (384-dim Sentence-Transformers)
+- Vector storage (Chroma, semantic search ready)
+
+**📌 Next Phase - Retrieval & Generation:**
+- [ ] Query transformation (HyDE, multi-query)
+- [ ] BM25 for hybrid retrieval (dense + sparse)
+- [ ] Re-ranking (cross-encoder)
+- [ ] GroqLLM integration (generation)
+- [ ] RAG pipeline: query → retrieve → generate
+- [ ] FastAPI + React UI
 
 ## License
 

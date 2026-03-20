@@ -1,158 +1,163 @@
 # PaperFlow
 
-A minimal RAG (Retrieval-Augmented Generation) system for research papers using **LangChain** primitives.
+Load research papers, split into chunks, and store with full metadata. Build a knowledge base for RAG systems in 3 lines of code.
 
-## ⭐ Key Features
+## Features
 
-- **LangChain-based**: Uses LangChain `Document` objects throughout pipeline
-- **Modular services**: Each service independent and reusable
-- **Incremental processing**: Only processes new/updated papers
-- **Persistent chunks**: Stores chunks with metadata in JSONL
-- **No config overhead**: Simple directory-based setup
-
-## Architecture
-
-### Core Data Flow
-
-```
-PDFs (any time)
-    ↓
-DocumentLoader (DirectoryLoader + PyMuPDFLoader)
-    → LangChain Document objects
-    ↓
-ChunkingService (RecursiveCharacterTextSplitter)
-    → LangChain Document chunks with metadata
-    ↓
-ChunkStore
-    → Persisted to chunks.jsonl
-```
-
-### Services (LangChain Document-based)
-
-**DocumentLoader** - Load PDFs as LangChain Documents
-- Uses: `langchain_community.document_loaders.DirectoryLoader` + `PyMuPDFLoader`
-- Returns: `List[Document]` with metadata (source, page)
-
-**ChunkingService** - Split Documents preserving metadata
-- Uses: `langchain_text_splitters.RecursiveCharacterTextSplitter`
-- Config: chunk_size=1000, chunk_overlap=200
-- Returns: `List[Document]` with chunk_index metadata
-
-**ChunkStore** - Persist and query Document chunks
-- Serializes: Document ↔ JSON with full metadata preservation
-- Methods: `load_all_chunks()`, `append_chunks()`, `get_chunks_by_source()`, `remove_chunks_by_source()`
-- Returns: `List[Document]`
-
-**IncrementalChunker** - Chunk specific papers
-- Orchestrates: DocumentLoader → ChunkingService
-- Returns: `List[Document]`
-
-**PaperRegistry** - Track processed papers
-- Detects: New papers (not in manifest) and updated papers (hash changed)
-- Persists: papers_manifest.json with MD5 hashes
-- Purpose: Avoid reprocessing
-
-**PaperProcessor** - Full orchestration
-- Workflow:
-  1. Registry finds new/updated papers
-  2. IncrementalChunker processes them
-  3. ChunkStore persists/updates chunks
-  4. Registry updates manifest
-- Returns: Processing summary
-
-## Directory Structure
-
-```
-backend/
-├── services/
-│   ├── document_loader.py       # LangChain DirectoryLoader wrapper
-│   ├── chunking_service.py      # LangChain RecursiveCharacterTextSplitter wrapper
-│   ├── incremental_chunker.py   # Orchestrates loader + chunker
-│   ├── chunk_store.py           # Document serialization + JSONL persistence
-│   ├── paper_registry.py        # Manifest-based change detection
-│   └── paper_processor.py       # Full orchestration
-├── process_papers.py            # CLI entry point
-├── example_usage.py             # Service examples
-├── test_services.py             # Unit tests
-└── requirements.txt             # Dependencies
-
-data/
-├── raw_papers/                  # Add PDF files here
-├── papers_manifest.json         # Auto-generated (tracks papers)
-└── chunks.jsonl                 # Auto-generated (all chunks)
-```
+- **Simple API**: Load PDFs → chunk → query in 3 service calls
+- **LangChain-native**: Full `Document` objects preserved throughout (metadata intact)
+- **Incremental processing**: Only reprocess modified papers (MD5 hashing)
+- **Flexible loading**: Bulk load via DirectoryLoader or single file via PyMuPDFLoader
+- **Persistent storage**: JSONL format with queryable metadata
+- **Change tracking**: Auto-detects new/modified papers, avoids redundant work
 
 ## Quick Start
 
-### 1. Install Dependencies
-
+### 1. Install
 ```bash
+python -m venv venv
+source venv/Scripts/activate  # Windows: venv\Scripts\activate
 pip install -r backend/requirements.txt
 ```
 
-Dependencies include:
-- `langchain-core` - Document objects
-- `langchain-community` - DirectoryLoader, PyMuPDFLoader
-- `langchain-text-splitters` - RecursiveCharacterTextSplitter
-- `pymupdf` - PDF loading
-
-### 2. Add Papers
-
-Place PDF files in `data/raw_papers/`:
-```bash
-mkdir -p data/raw_papers
-cp my_research_papers/*.pdf data/raw_papers/
+### 2. Configure
+Create `.env`:
+```
+RAW_PAPERS_DIR=data/raw_papers
+CHUNKS_FILE=data/chunks.jsonl
+MANIFEST_PATH=data/papers_manifest.json
+CHUNK_SIZE=1000
+CHUNK_OVERLAP=200
 ```
 
 ### 3. Process Papers
-
 ```bash
-python -m backend.process_papers
+# Add PDFs to data/raw_papers/
+cp /path/to/papers/*.pdf data/raw_papers/
+
+# Process
+python -m backend.init_rag
 ```
 
-**First Run Output:**
-```
-Started paper processing...
-New papers: 3
-Updated papers: 0
-Processing complete! ✓
-Total chunks: 427
+### 4. Query
+```python
+from backend.services.chunk_store import ChunkStore
+from backend.services.settings import settings
+
+store = ChunkStore(settings.chunks_file)
+
+# Get all chunks
+all_chunks = store.load_all()
+
+# Get chunks from specific paper
+paper_chunks = store.get_by_source("research_paper.pdf")
+
+# Get stats
+stats = store.get_stats()  # {total_chunks, total_sources, chunks_per_source}
 ```
 
-**Next Run (with new papers):**
+## API Reference
+
+### DocumentLoader
+```python
+from backend.services.document_loader import DocumentLoader
+
+loader = DocumentLoader()
+docs = loader.load_all_pdfs()           # Bulk load from data/raw_papers/
+docs = loader.load_specific_pdf("name.pdf")  # Single file
 ```
-Started paper processing...
-New papers: 1
-Updated papers: 0
-Processing complete! ✓
-Total chunks: 523  # Only new paper chunks added
+
+### ChunkingService
+```python
+from backend.services.chunking_service import ChunkingService
+
+chunker = ChunkingService()
+chunks = chunker.chunk_documents(docs)  # Returns Document objects with chunk_index
 ```
 
-## Development Roadmap
+### ChunkStore
+```python
+from backend.services.chunk_store import ChunkStore
 
-- [ ] Document loading & chunking
-- [ ] Incremental paper processing
-- [ ] Embedding generation (Qdrant)
-- [ ] BM25 indexing
-- [ ] Hybrid retrieval pipeline
-- [ ] Reranking
-- [ ] GroqLLM generation
-- [ ] FastAPI endpoints
-- [ ] React frontend
-- [ ] Evaluation suite
+store = ChunkStore("data/chunks.jsonl")
+store.append_chunks(chunks)              # Add chunks
+all_chunks = store.load_all()            # Get all chunks
+paper_chunks = store.get_by_source("file.pdf")
+store.remove_by_source("file.pdf")       # Delete by paper
+stats = store.get_stats()
+```
 
-## Technologies
+### PaperRegistry
+```python
+from backend.services.paper_registry import PaperRegistry
+
+registry = PaperRegistry("data/papers_manifest.json")
+new = registry.get_new_papers("data/raw_papers/")      # Unprocessed
+updated = registry.get_updated_papers("data/raw_papers/")  # Modified
+status = registry.get_status()           # {total_papers, total_chunks, papers: [...]}
+```
+
+### PaperProcessor (Orchestrator)
+```python
+from backend.services.paper_processor import PaperProcessor
+
+processor = PaperProcessor()
+result = processor.process_all()  # Load → chunk → store → track
+# Returns: {new_processed, updated_processed, total_chunks, status}
+```
+
+## How It Works
+
+```
+PDFs (data/raw_papers/)
+  ↓
+DocumentLoader (load_all_pdfs or load_specific_pdf)
+  ↓
+LangChain Documents with metadata (source, page)
+  ↓
+ChunkingService (RecursiveCharacterTextSplitter)
+  ↓
+Chunks with added chunk_index metadata
+  ↓
+ChunkStore (JSONL persistence)
+  ↓
+Query by source, get stats, track changes
+  ↓
+PaperRegistry (MD5 hashing for change detection)
+```
+
+Each service is independent—use them individually or orchestrate with `PaperProcessor`.
+
+## Examples
+
+See [examples.ipynb](examples.ipynb) for a working 7-step notebook:
+1. Setup (imports, config)
+2. Check prerequisites
+3. Process papers
+4. Inspect results
+5. Query chunks
+6. Query by paper
+7. Detect changes
+
+
+## Tech Stack
 
 - **PDF Processing**: PyMuPDF
-- **LLM**: GroqLLM (Mixtral, Llama)
-- **Embeddings**: Sentence-Transformers
-- **Vector DB**: Qdrant
-- **Backend**: FastAPI
-- **Frontend**: React
+- **Document Format**: LangChain Document objects
+- **Text Splitting**: LangChain RecursiveCharacterTextSplitter
+- **Storage**: JSONL (preserves full metadata)
+- **Change Detection**: MD5 hashing
+- **Config**: Pydantic Settings + .env
 
----
+## Next Steps
 
-**Type**: Portfolio Project | RAG System
+Build embeddings, vector search, and LLM generation on top of this knowledge base:
+- [ ] Sentence-Transformers for embeddings
+- [ ] Vector storage
+- [ ] Hybrid retrieval (BM25 + semantic)
+- [ ] GroqLLM integration
+- [ ] FastAPI + React frontend
 
---- 
-Developed by Aaradhya Kulkarni | [GitHub](https://github.com/adhi1911)
+## License
+
+MIT

@@ -1,0 +1,23 @@
+name: "Question Answering"
+description: "Straightforward answers with clear explanations"
+
+retrieval:
+  strategy: "hybrid"
+  top_k: 12
+  dense_weight: 0.65
+  sparse_weight: 0.35
+  query_expansion: true
+  expansion_queries: 3
+
+reranking:
+  enabled: true
+  top_k: 4
+  threshold: 0.05
+
+generation:
+  temperature: 0.25
+  response_format: "narrative"
+  system_message: >
+    Answer the question clearly with relevant examples from the provided sources.
+    Structure your answer in a logical flow. When citing sources, use [1], [2], etc.
+  include_reasoning: false

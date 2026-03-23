@@ -1,0 +1,23 @@
+name: "Simple Q&A"
+description: "Fast, direct answers to specific questions"
+
+retrieval:
+  strategy: "hybrid"
+  top_k: 8
+  dense_weight: 0.6
+  sparse_weight: 0.4
+  query_expansion: false
+  expansion_queries: 1
+
+reranking:
+  enabled: true
+  top_k: 3
+  threshold: 0.0
+
+generation:
+  temperature: 0.2
+  response_format: "concise"
+  system_message: >
+    Answer the question directly and concisely. Use simple language.
+    Focus only on the most essential information.
+  include_reasoning: false

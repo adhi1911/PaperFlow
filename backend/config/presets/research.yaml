@@ -1,0 +1,24 @@
+name: "Research Synthesis"
+description: "Synthesize information from multiple research papers"
+
+retrieval:
+  strategy: "hybrid"
+  top_k: 20
+  dense_weight: 0.7
+  sparse_weight: 0.3
+  query_expansion: true
+  expansion_queries: 5
+
+reranking:
+  enabled: true
+  top_k: 8
+  threshold: 0.0
+
+generation:
+  temperature: 0.4
+  response_format: "research"
+  system_message: >
+    You are a research synthesizer. Your role is to integrate findings from
+    multiple sources, highlight convergences and divergences, and identify
+    research gaps. Show your reasoning process.
+  include_reasoning: true

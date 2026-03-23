@@ -7,6 +7,7 @@ class Settings(BaseSettings):
     project_root: Path = Path(__file__).parent.parent.parent
     data_dir: Path = Path(__file__).parent.parent.parent / "data"
     raw_papers_dir: Path = Path(__file__).parent.parent.parent / "data" / "raw_papers"
+    vector_store_dir: Path = Path(__file__).parent.parent.parent / "data" / "vector_store"
     
     # File paths
     manifest_path: Path = Path(__file__).parent.parent.parent / "data" / "papers_manifest.json"
@@ -26,6 +27,8 @@ class Settings(BaseSettings):
     # Logging
     log_level: str = "INFO"
     
+    # groq
+    groq_api_key: str = ""
     class Config:
         env_file = ".env"
         case_sensitive = False

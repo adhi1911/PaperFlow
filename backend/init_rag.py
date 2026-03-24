@@ -1,96 +1,132 @@
-"""Initialize RAG knowledge base - builds chunk store from raw papers."""
+"""Initialize RAG: Load papers → Chunk → Embed → Store in vector DB."""
 import logging
-import sys
+import time
 from pathlib import Path
+from dotenv import load_dotenv
 
-from backend.core.config import settings
+# Load environment variables from .env file
+load_dotenv()
+
 from backend.services.paper_processor import PaperProcessor
+from backend.services.chunk_store import ChunkStore
+from backend.services.embedding import EmbeddingService
+from backend.services.vector_store import VectorStore
 
 logging.basicConfig(
-    level=settings.log_level,
+    level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
+
+# Suppress verbose logs from HuggingFace Hub
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("huggingface_hub").setLevel(logging.WARNING)
+
 logger = logging.getLogger(__name__)
 
 
-def initialize_rag():
-    """
-    Build the RAG knowledge base:
-    1. Load all PDFs from data/raw_papers/
-    2. Chunk them
-    3. Store in data/chunks.jsonl
-    4. Track in data/papers_manifest.json
+def main():
+    """Initialize RAG knowledge base with embeddings and vector store."""
     
-    Idempotent - can be run multiple times to refresh.
-    """
+    print("\n" + "=" * 70)
+    print("PaperFlow RAG Initialization")
+    print("=" * 70)
     
-    print("\n" + "="*70)
-    print("INITIALIZING RAG KNOWLEDGE BASE")
-    print("="*70)
+    # Ensure data directory exists
+    project_root = Path(__file__).parent.parent
+    data_dir = project_root / "data"
+    data_dir.mkdir(exist_ok=True)
     
-    # Check if papers exist
-    pdf_files = list(settings.raw_papers_dir.glob("*.pdf"))
-    if not pdf_files:
-        print(f"\n No PDFs found in {settings.raw_papers_dir}")
-        print("Add PDF files first!")
+    start_time = time.time()
+    
+    # ===== Step 1: Process papers (load → chunk → store) =====
+    print("\nStep 1: Processing papers...")
+    print("-" * 70)
+    
+    try:
+        processor = PaperProcessor(
+            papers_dir=data_dir / "raw_papers",
+            manifest_path=data_dir / "papers_manifest.json",
+            chunks_file=data_dir / "chunks.jsonl",
+            project_root=project_root
+        )
+        result = processor.process_all()
+        
+        print(f"[OK] {result['new_processed']} new papers processed")
+        print(f"[OK] {result['updated_processed']} papers reprocessed")
+        print(f"[OK] Total chunks: {result['total_chunks']}")
+    except Exception as e:
+        print(f"[ERROR] Paper processing failed: {e}")
+        logger.error(f"Paper processing error: {e}", exc_info=True)
         return False
     
-    print(f"\n✓ Found {len(pdf_files)} PDFs to process")
-    print(f"  Papers directory: {settings.raw_papers_dir}")
-    print(f"  Output chunks: {settings.chunks_file}")
-    print(f"  Output manifest: {settings.manifest_path}")
+    # ===== Step 2: Generate embeddings =====
+    print("\nStep 2: Generating embeddings...")
+    print("-" * 70)
     
-    print(f"\nChunking config:")
-    print(f"  Size: {settings.chunk_size}")
-    print(f"  Overlap: {settings.chunk_overlap}")
+    try:
+        # Load all chunks
+        store = ChunkStore("data/chunks.jsonl")
+        all_chunks = store.load_all()
+        
+        if not all_chunks:
+            print("[ERROR] No chunks found. Please process papers first.")
+            return False
+        
+        # Initialize embedding service
+        embedding_service = EmbeddingService(model_name="all-MiniLM-L6-v2")
+        print(f"[OK] {embedding_service}")
+        
+        # Generate embeddings
+        print(f"Embedding {len(all_chunks)} chunks...")
+        embedding_results = embedding_service.embed_chunks(all_chunks, batch_size=32)
+        print(f"[OK] Generated {len(embedding_results)} embeddings")
+    except Exception as e:
+        print(f"[ERROR] Embedding generation failed: {e}")
+        logger.error(f"Embedding generation error: {e}", exc_info=True)
+        return False
     
-    # Initialize processor
-    processor = PaperProcessor(
-        papers_dir=settings.raw_papers_dir,
-        manifest_path=settings.manifest_path,
-        chunks_file=settings.chunks_file,
-        chunk_size=settings.chunk_size,
-        chunk_overlap=settings.chunk_overlap,
-    )
+    # ===== Step 3: Store embeddings =====
+    print("\nStep 3: Storing embeddings in vector database...")
+    print("-" * 70)
     
-    print("\n" + "-"*70)
-    print("Processing papers...")
-    print("-"*70)
+    try:
+        vector_store = VectorStore(persist_directory=data_dir / "vector_store", project_root=project_root)
+        added = vector_store.add_embeddings(embedding_results, auto_delete_source=True)
+        print(f"[OK] Added {added} embeddings to vector store")
+    except Exception as e:
+        print(f"[ERROR] Vector store indexing failed: {e}")
+        logger.error(f"Vector store error: {e}", exc_info=True)
+        return False
     
-    # Run initialization
-    result = processor.process_all()
+    # ===== Summary =====
+    elapsed = time.time() - start_time
+    chunk_stats = store.get_stats()
+    vector_stats = vector_store.get_stats()
     
-    # Report results
-    print("\n" + "="*70)
-    print("INITIALIZATION COMPLETE")
-    print("="*70)
+    print("\n" + "=" * 70)
+    print("Initialization Complete!")
+    print("=" * 70)
     
-    print(f"\n✓ New papers processed: {result['new_processed']}")
-    print(f"✓ Updated papers processed: {result['updated_processed']}")
-    print(f"✓ Total chunks created: {result['total_chunks']}")
+    print(f"\nTotal time: {elapsed:.1f}s")
+    print(f"Chunks: {chunk_stats['total_chunks']} from {chunk_stats['total_sources']} sources")
+    print(f"Vectors: {vector_stats['total_vectors']} in vector store")
+    print(f"Embedding dimension: {embedding_service.get_embedding_dim()}")
     
-    status = result['status']
-    print(f"\nRegistry status:")
-    print(f"  Total papers tracked: {status['total_papers']}")
-    print(f"  Total chunks stored: {status['total_chunks']}")
+    print(f"\nFiles created:")
+    print(f"   - data/chunks.jsonl ({chunk_stats['total_chunks']} chunks)")
+    print(f"   - data/papers_manifest.json")
+    print(f"   - data/vector_store/ (Chroma DB)")
     
-    print(f"\nFiles created/updated:")
-    print(f"  - {settings.chunks_file} ({result['total_chunks']} chunks)")
-    print(f"  - {settings.manifest_path} ({status['total_papers']} papers)")
-    
-    print("\n RAG knowledge base ready!")
-    print("\nNext steps:")
-    print("  1. Generate embeddings from chunks")
-    print("  2. Store in vector database (Qdrant/FAISS)")
-    print("  3. Build retrieval pipeline")
-    print("  4. Connect to LLM for answers")
+    print("\nReady for retrieval & generation!")
+    print("   Next: Use VectorStore.search() for semantic search\n")
     
     return True
 
 
 if __name__ == "__main__":
+    import sys
     try:
-        success = initialize_rag()
+        success = main()
         sys.exit(0 if success else 1)
     except Exception as e:
         logger.error(f"Initialization failed: {e}", exc_info=True)

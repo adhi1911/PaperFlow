@@ -16,7 +16,7 @@ class CrossEncoderReRanker:
         self.model = CrossEncoder(model_name)
         self.batch_size = batch_size
         # logger.debug(type(self.model))
-        logger.info(f"Loading cross-encoder model: {self.model}")
+        logger.info(f"Loading cross-encoder model: {model_name}")
         logger.info(f"Dimension: {self.model.max_length}")
 
 

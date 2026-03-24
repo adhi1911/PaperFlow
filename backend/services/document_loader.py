@@ -1,10 +1,11 @@
 """Load PDFs from directory using LangChain."""
 import logging
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 from langchain_community.document_loaders import DirectoryLoader, PyMuPDFLoader
 from langchain_core.documents import Document
+from backend.utils.path_utils import get_relative_path
 
 
 logger = logging.getLogger(__name__)
@@ -13,8 +14,9 @@ logger = logging.getLogger(__name__)
 class DocumentLoader:
     """Load PDFs and return LangChain Document objects."""
 
-    def __init__(self, papers_dir: Path):
+    def __init__(self, papers_dir: Path, project_root: Optional[Path] = None):
         self.papers_dir = Path(papers_dir)
+        self.project_root = project_root
         self.papers_dir.mkdir(parents=True, exist_ok=True)
 
     def load_all_pdfs(self) -> List[Document]:
@@ -28,7 +30,8 @@ class DocumentLoader:
         
         try:
             documents = loader.load()
-            logger.info(f"Loaded {len(documents)} documents from {self.papers_dir}")
+            relative_path = get_relative_path(self.papers_dir, self.project_root)
+            logger.info(f"Loaded {len(documents)} documents from {relative_path}")
             return documents
         except Exception as e:
             logger.error(f"Error loading documents: {e}")

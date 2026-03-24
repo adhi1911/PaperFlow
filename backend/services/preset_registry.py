@@ -1,25 +1,29 @@
 from pathlib import Path 
-from typing import Dict, Any 
+from typing import Dict, Any, Optional
 import yaml 
 import json 
 import logging 
+from backend.utils.path_utils import get_relative_path
 
 logger = logging.getLogger(__name__)
 
 class PresetRegistry: 
     def __init__(self, 
-                preset_dir: Path | str = None
+                preset_dir: Path | str = None,
+                project_root: Optional[Path] = None
             ): 
         if preset_dir is None: 
             preset_dir = Path(__file__).parent.parent / "config" / "presets"
 
         self.preset_dir = Path(preset_dir)
+        self.project_root = project_root
         self._presets_cache: Dict[str, Dict[str, Any]] = {}
         self._load_presets()
 
     def _load_presets(self): 
         if not self.preset_dir.exists():
-            logger.warning(f"Preset directory not found: {self.preset_dir}")
+            relative_path = get_relative_path(self.preset_dir, self.project_root)
+            logger.warning(f"Preset directory not found: {relative_path}")
             return
 
         for preset_file in self.preset_dir.glob("*.yaml"): 

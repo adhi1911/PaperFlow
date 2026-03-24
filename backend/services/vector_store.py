@@ -2,10 +2,11 @@
 
 import logging 
 from pathlib import Path 
-from typing import List , Dict, Any
+from typing import List , Dict, Any, Optional
 
 import numpy as np 
 import chromadb 
+from backend.utils.path_utils import get_relative_path
 
 logger = logging.getLogger(__name__)
 
@@ -14,9 +15,11 @@ class VectorStore:
     def __init__(self, 
                  collection_name: str = "paper_chunks",
                  persist_directory: Path = Path("./vector_store"),
+                 project_root: Optional[Path] = None
     ):
         self.collection_name = collection_name 
         self.persist_directory = Path(persist_directory)
+        self.project_root = project_root
         self.client = None 
         self.collection = None 
         self._initialize() 
@@ -31,7 +34,8 @@ class VectorStore:
                 metadata = {"description": "Chunks of academic papers with metadata"}
             )
 
-            logger.info(f"Initialized vector store at {self.persist_directory} with collection '{self.collection_name}'")
+            relative_path = get_relative_path(self.persist_directory, self.project_root)
+            logger.info(f"Initialized vector store at {relative_path} with collection '{self.collection_name}'")
         except Exception as e:
             logger.error(f"Error initializing vector store: {e}")
             raise

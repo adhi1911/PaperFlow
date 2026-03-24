@@ -1,7 +1,7 @@
 """Orchestrate paper processing: load → chunk → store → track."""
 import logging
 from pathlib import Path
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 from backend.services.paper_registry import PaperRegistry
 from backend.services.document_loader import DocumentLoader
@@ -22,12 +22,13 @@ class PaperProcessor:
         chunks_file: Path,
         chunk_size: int = 1000,
         chunk_overlap: int = 200,
+        project_root: Optional[Path] = None,
     ):
         self.papers_dir = Path(papers_dir)
         self.papers_dir.mkdir(parents=True, exist_ok=True)
 
         self.registry = PaperRegistry(manifest_path)
-        self.loader = DocumentLoader(self.papers_dir)
+        self.loader = DocumentLoader(self.papers_dir, project_root=project_root)
         self.chunker = ChunkingService(chunk_size, chunk_overlap)
         self.store = ChunkStore(chunks_file)
 
